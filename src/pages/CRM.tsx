@@ -1,8 +1,11 @@
+import { apiFetch } from '../lib/api';
 import { useState, useEffect } from 'react';
 import { Plus, MoreHorizontal, LineChart, Search, Filter } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Button } from '@/components/ui/button';
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
+import { Input } from '@/components/ui/input';
 
 const MOCK_STAGES = [
   { id: 'awareness', name: 'Awareness', color: 'border-l-indigo-500' },
@@ -14,9 +17,12 @@ const MOCK_STAGES = [
 export function CRM() {
   const [leads, setLeads] = useState<any[]>([]);
   const [draggedLead, setDraggedLead] = useState<any>(null);
+  const [isAddOpen, setIsAddOpen] = useState(false);
+  const [newLeadStage, setNewLeadStage] = useState('awareness');
+  const [newLeadForm, setNewLeadForm] = useState({ name: '', contact: '', value: '' });
 
   useEffect(() => {
-    fetch('/api/leads')
+    apiFetch('/api/leads')
       .then(res => res.json())
       .then(data => setLeads(data.data || []));
   }, []);
@@ -39,7 +45,7 @@ export function CRM() {
     setLeads(prev => prev.map(l => l.id === draggedLead.id ? { ...l, stage: targetStage } : l));
 
     try {
-      await fetch(`/api/leads/${draggedLead.id}`, {
+      await apiFetch(`/api/leads/${draggedLead.id}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ stage: targetStage })
@@ -47,10 +53,29 @@ export function CRM() {
     } catch (e) {
       console.error('Failed to update lead:', e);
       // Revert optimistic update on failure
-      const reverted = await fetch('/api/leads').then(res => res.json());
+      const reverted = await apiFetch('/api/leads').then(res => res.json());
       setLeads(reverted.data || []);
     } finally {
       setDraggedLead(null);
+    }
+  };
+
+  const handleAddLead = async () => {
+    if(!newLeadForm.name) return;
+    try {
+      const res = await apiFetch('/api/leads', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ...newLeadForm, stage: newLeadStage, tags: ['Manual Entry'] })
+      });
+      const data = await res.json();
+      if(data.success) {
+        setLeads(prev => [...prev, data.lead]);
+        setIsAddOpen(false);
+        setNewLeadForm({ name: '', contact: '', value: '' });
+      }
+    } catch (e) {
+      console.error('Failed to add lead:', e);
     }
   };
 
@@ -74,9 +99,32 @@ export function CRM() {
           <Button variant="outline" size="sm" className="h-8 text-xs">
             <Filter className="w-3.5 h-3.5 mr-2" /> Filter
           </Button>
-          <Button size="sm" className="h-8 text-xs bg-primary text-white hover:bg-primary/90">
-            <Plus className="w-3.5 h-3.5 mr-2" /> New Lead
-          </Button>
+          
+          <Dialog open={isAddOpen} onOpenChange={setIsAddOpen}>
+            <DialogTrigger className="inline-flex items-center justify-center rounded-[min(var(--radius-md),12px)] border border-transparent text-sm transition-all focus-visible:ring-3 disabled:pointer-events-none disabled:opacity-50 group/button shrink-0 bg-primary text-primary-foreground hover:bg-primary/90 h-8 px-2.5 font-semibold">
+              <Plus className="w-3.5 h-3.5 mr-2" /> New Lead
+            </DialogTrigger>
+            <DialogContent className="sm:max-w-md">
+              <DialogHeader>
+                <DialogTitle>Add New Lead</DialogTitle>
+              </DialogHeader>
+              <div className="grid gap-4 py-4">
+                <div className="space-y-2">
+                  <label className="text-xs font-semibold">Company Name</label>
+                  <Input value={newLeadForm.name} onChange={e => setNewLeadForm({...newLeadForm, name: e.target.value})} placeholder="e.g. Acme Corp" />
+                </div>
+                <div className="space-y-2">
+                  <label className="text-xs font-semibold">Contact Person</label>
+                  <Input value={newLeadForm.contact} onChange={e => setNewLeadForm({...newLeadForm, contact: e.target.value})} placeholder="e.g. John Doe" />
+                </div>
+                <div className="space-y-2">
+                  <label className="text-xs font-semibold">Deal Value</label>
+                  <Input value={newLeadForm.value} onChange={e => setNewLeadForm({...newLeadForm, value: e.target.value})} placeholder="e.g. $15,000" />
+                </div>
+                <Button onClick={handleAddLead} className="w-full mt-2">Create Deal</Button>
+              </div>
+            </DialogContent>
+          </Dialog>
         </div>
       </div>
 
@@ -116,7 +164,7 @@ export function CRM() {
                   <div className="text-xs text-muted-foreground mb-3">{lead.contact}</div>
                   
                   <div className="flex flex-wrap gap-1 mb-3">
-                    {lead.tags.map((tag: string) => (
+                    {lead.tags?.map((tag: string) => (
                       <span key={tag} className="text-[9px] px-1.5 py-0.5 rounded bg-muted text-muted-foreground uppercase tracking-wider font-semibold">
                         {tag}
                       </span>
@@ -127,7 +175,7 @@ export function CRM() {
                     <div className="flex -space-x-1">
                       <Avatar className="w-5 h-5 border-2 border-card">
                         <AvatarImage src={`https://api.dicebear.com/7.x/avataaars/svg?seed=${lead.contact}`} />
-                        <AvatarFallback className="text-[8px]">{lead.contact.substring(0,2)}</AvatarFallback>
+                        <AvatarFallback className="text-[8px]">{lead.contact?.substring(0,2)}</AvatarFallback>
                       </Avatar>
                     </div>
                     <span className="text-xs font-bold text-foreground">{lead.value}</span>
@@ -136,7 +184,7 @@ export function CRM() {
               ))}
               
               {/* Add Lead placeholder area */}
-              <button className="border border-dashed border-border/60 rounded-xl p-2 text-xs text-muted-foreground hover:bg-muted/30 hover:text-foreground transition-colors justify-center flex items-center gap-1 opacity-50 hover:opacity-100 mt-2">
+              <button onClick={() => { setNewLeadStage(stage.id); setIsAddOpen(true); }} className="border border-dashed border-border/60 rounded-xl p-2 text-xs text-muted-foreground hover:bg-muted/30 hover:text-foreground transition-colors justify-center flex items-center gap-1 opacity-50 hover:opacity-100 mt-2">
                 <Plus className="w-3.5 h-3.5" /> Add card
               </button>
             </div>

@@ -1,3 +1,4 @@
+import { apiFetch } from '../lib/api';
 import { useState, useEffect } from 'react';
 import { Settings, Save, Globe, Shield, Activity, User, Building2, Bell } from 'lucide-react';
 import { Button } from '@/components/ui/button';
@@ -9,7 +10,7 @@ export function WorkspaceSettings() {
   const [saving, setSaving] = useState(false);
 
   useEffect(() => {
-    fetch('/api/settings')
+    apiFetch('/api/settings')
       .then(res => res.json())
       .then(data => {
         setSettings(data.data);
@@ -19,7 +20,7 @@ export function WorkspaceSettings() {
 
   const handleSave = async () => {
     setSaving(true);
-    await fetch('/api/settings', {
+    await apiFetch('/api/settings', {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(settings)

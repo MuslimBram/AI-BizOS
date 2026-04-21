@@ -1,4 +1,11 @@
+import { Server as SocketIOServer } from 'socket.io';
+import http from 'http';
+import { encrypt, decrypt } from './encryption';
+
 import express from "express";
+import admin from 'firebase-admin';
+
+
 import { createServer as createViteServer } from "vite";
 import path from "path";
 import cors from "cors";
@@ -8,84 +15,7 @@ import { GoogleGenAI } from "@google/genai";
 // AI Studio injection
 const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY || "AIzaSy_mock_key" });
 
-// ==========================================
-// IN-MEMORY DATABASE (Sandbox Fallback)
-// Ensures the E2E flow works immediately
-// ==========================================
-const db = {
-  conversations: [
-    { id: 1, name: 'Marco Rossi', platform: 'whatsapp', color: 'bg-[#25D366]', lastMsg: "AI Reply: I've scheduled your demo...", time: '2m', unread: true },
-    { id: 2, name: 'Crypto Partner', platform: 'telegram', color: 'bg-[#0088cc]', lastMsg: 'Proposal attached regarding Q4...', time: '15m', unread: true },
-    { id: 3, name: 'Sarah Jenkins', platform: 'email', color: 'bg-[#EA4335]', lastMsg: 'Pending ticket support...', time: '1h', unread: false }
-  ],
-  messages: [
-    { id: 101, conversation_id: 1, content: "Hi, I'm interested in the enterprise plan. Can we schedule a demo for next week?", sender_type: "contact", created_at: new Date(Date.now() - 60000).toISOString() },
-    { id: 102, conversation_id: 1, content: "Hello Marco! We'd love to show you the enterprise features. I've sent a calendar link to your email so you can pick a time.", sender_type: "bot", created_at: new Date(Date.now() - 30000).toISOString() }
-  ],
-  leads: [
-    { id: 1, name: 'Tech Solutions Inc', contact: 'John Carter', value: '$45,000', stage: 'awareness', tags: ['Enterprise', 'B2B'] },
-    { id: 2, name: 'Stark Industries', contact: 'Tony S.', value: '$120,000', stage: 'decision', tags: ['VIP', 'Defense'] },
-    { id: 3, name: 'Wayne Enterprises', contact: 'Bruce W.', value: '$85,000', stage: 'negotiation', tags: ['Corporate'] },
-    { id: 4, name: 'Acme Corp', contact: 'Road R.', value: '$12,500', stage: 'awareness', tags: ['SMB'] }
-  ],
-  campaigns: [
-    { id: 1, name: 'Black Friday SaaS Run', audience: 'awareness', status: 'completed', sent: 1450, opens: 890, replies: 120, created_at: new Date(Date.now() - 86400000 * 5).toISOString() },
-    { id: 2, name: 'Q4 Enterprise Upsell', audience: 'decision', status: 'draft', sent: 0, opens: 0, replies: 0, created_at: new Date().toISOString() }
-  ],
-  calls: [
-    { id: 1, contact: 'Sarah Jenkins', type: 'inbound', duration: '04:12', status: 'completed', transcript: 'Customer inquired about the enterprise plan pricing.', ai_summary: 'Interested in enterprise. Need to send proposal.', time: '1h ago' },
-    { id: 2, contact: 'Michael Chang', type: 'outbound', duration: '12:05', status: 'completed', transcript: 'Discussed Q4 deliverables and timeline.', ai_summary: 'Project on track. Next sync next Tuesday.', time: '2h ago' },
-    { id: 3, contact: 'Unknown Caller', type: 'missed', duration: '00:00', status: 'missed', transcript: '', ai_summary: '', time: '3h ago' }
-  ],
-  automations: [
-    { id: 1, name: 'Initial Welcome Message', trigger: 'New Conversation', action: 'Send Text: "Hi! How can we help?"', status: 'active', executions: 1240 },
-    { id: 2, name: 'High-Intent Tagging', trigger: 'Keyword: "pricing"', action: 'Add Tag: "hot-lead"', status: 'active', executions: 85 }
-  ],
-  tickets: [
-    { id: 101, subject: 'Increase API Rate Limits', status: 'open', priority: 'high', user: 'admin@bizos.test', created_at: '2 hours ago' },
-    { id: 102, subject: 'WhatsApp channel disconnecting', status: 'resolved', priority: 'medium', user: 'admin@bizos.test', created_at: '1 day ago' }
-  ],
-  billing: {
-    plan: 'enterprise',
-    status: 'active',
-    billing_cycle: 'monthly',
-    renewal_date: new Date(Date.now() + 86400000 * 24).toISOString(), // 24 days left
-    usage: {
-      team_members: { used: 4, limit: 10 },
-      contacts: { used: 12400, limit: 50000 },
-      ai_words: { used: 145000, limit: 500000 },
-      monthly_emails: { used: 45000, limit: 100000 }
-    },
-    invoices: [
-      { id: 'INV-2026-04-01', amount: 249.00, status: 'paid', date: new Date(Date.now() - 86400000 * 15).toISOString() },
-      { id: 'INV-2026-03-01', amount: 249.00, status: 'paid', date: new Date(Date.now() - 86400000 * 45).toISOString() }
-    ]
-  },
-  settings: {
-    workspaceName: "AI BizOS Admin",
-    domain: "admin.bizos.test",
-    timezone: "America/Los_Angeles",
-    industry: "SaaS",
-    allowSignups: true
-  },
-  agents: [
-    { id: 'ag-1', name: 'Ava (Sales SDR)', role: 'Outbound Leads', status: 'active', tasks_completed: 1400, accuracy: 98.2 },
-    { id: 'ag-2', name: 'Marcus (Support)', role: 'L1 Helpdesk', status: 'active', tasks_completed: 8230, accuracy: 99.1 },
-    { id: 'ag-3', name: 'Nexus (Data Ops)', role: 'CRM Syncing', status: 'sleeping', tasks_completed: 450, accuracy: 100 }
-  ],
-  integrations: [
-    { id: 'int-1', provider: 'Stripe', category: 'Payments', status: 'connected', last_sync: '10 mins ago' },
-    { id: 'int-2', provider: 'Twilio', category: 'Communications', status: 'connected', last_sync: '1 min ago' },
-    { id: 'int-3', provider: 'Shopify', category: 'Commerce', status: 'disconnected', last_sync: 'Never' },
-    { id: 'int-4', provider: 'Slack', category: 'Notifications', status: 'connected', last_sync: '2 hours ago' },
-    { id: 'int-5', provider: 'Salesforce', category: 'CRM', status: 'disconnected', last_sync: 'Never' }
-  ],
-  users: [
-    { id: 'u1', email: 'muslimani181@gmail.com', role: 'owner', name: 'Master Owner', status: 'active', avatar: 'https://i.pravatar.cc/150?u=u1' },
-    { id: 'u2', email: 'muslim.brami@gmail.com', role: 'admin', name: 'Admin Brami', status: 'active', avatar: 'https://i.pravatar.cc/150?u=u2' },
-    { id: 'u3', email: 'alex@bizos.test', role: 'user', name: 'Alex Rivera', status: 'active', avatar: 'https://i.pravatar.cc/150?u=u3' }
-  ]
-};
+import { Queries as db, tenantContext } from './db';
 
 async function startServer() {
   const app = express();
@@ -94,96 +24,609 @@ async function startServer() {
   app.use(express.json());
   app.use(cors());
 
+  
+// Initialize firebase admin
+admin.initializeApp({
+  projectId: "ai-bizos", // Matched from frontend config
+});
+
+// Auth Middleware
+const requireAuth = async (req: express.Request, res: express.Response, next: express.NextFunction) => {
+  const authHeader = req.headers.authorization;
+  if (!authHeader || !authHeader.startsWith('Bearer ')) {
+    return res.status(401).json({ error: "Unauthorized: Missing Token" });
+  }
+
+  const token = authHeader.split('Bearer ')[1];
+  try {
+    const decodedToken = await admin.auth().verifyIdToken(token);
+    (req as any).user = decodedToken;
+    
+    // Auto-create or fetch user in SQLite
+    let user = db.getUserById(decodedToken.uid);
+    if (!user) {
+        const isOwner = decodedToken.email === 'muslimani181@gmail.com';
+        user = {
+            id: decodedToken.uid,
+            email: decodedToken.email || '',
+            name: decodedToken.name || (decodedToken.email ? decodedToken.email.split('@')[0] : 'User'),
+            role: isOwner ? 'owner' : 'user',
+            status: 'active',
+            avatar: decodedToken.picture || null,
+        };
+        db.createUser(user);
+    }
+    
+    next();
+  } catch(e: any) {
+    return res.status(401).json({ error: "Unauthorized: Invalid Token", details: e.message });
+  }
+};
+
+
+const requireRole = (allowedRoles: string[]) => {
+  return (req: express.Request, res: express.Response, next: express.NextFunction) => {
+    const userRole = db.getUserById((req as any).user.uid)?.role || 'user';
+    if (!allowedRoles.includes(userRole)) {
+      return res.status(403).json({ error: "Forbidden: Insufficient privileges" });
+    }
+    next();
+  };
+};
+
   // --- API LAYER ---
+  app.use((req, res, next) => {
+    const wsId = req.headers['x-workspace-id'] || 'ws-bizos-001';
+    tenantContext.run({ workspaceId: wsId as string }, () => {
+      next();
+    });
+  });
 
-  // Health
+  // Health & Webhooks (Public)
   app.get("/api/health", (req, res) => res.json({ status: "ok" }));
+  app.post("/api/webhooks/*", (req, res, next) => {
+    // Let webhooks pass down
+    next();
+  });
 
+  // Protect all other /api routes
+  app.use("/api", (req, res, next) => {
+    if (req.path.startsWith("/webhooks/") || req.path === "/health") {
+      return next();
+    }
+    return requireAuth(req, res, next);
+  });
+
+
+  
   // Autonomous Agents
-  app.get("/api/agents", (req, res) => res.json({ data: db.agents }));
+  app.get("/api/agents", (req, res) => res.json({ data: db.getAgents() }));
   
   // Integrations Hub
-  app.get("/api/integrations", (req, res) => res.json({ data: db.integrations }));
-  app.post("/api/integrations/toggle", (req, res) => {
+  app.get("/api/integrations", (req, res) => res.json({ data: db.getIntegrations() }));
+  app.post("/api/integrations/toggle", requireRole(["owner", "admin"]), (req, res) => {
     const { id } = req.body;
-    const target = db.integrations.find(i => i.id === id);
+    const target = db.getIntegrationById(id);
     if (target) {
       target.status = target.status === 'connected' ? 'disconnected' : 'connected';
       target.last_sync = target.status === 'connected' ? 'Just now' : 'Never';
     }
-    res.json({ success: true, data: db.integrations });
+    res.json({ success: true, data: db.getIntegrations() });
   });
 
-  // Auth / Login Simulation
-  app.post("/api/auth/login", (req, res) => {
-    const { email, password } = req.body;
-    if (email && email.includes('@')) {
-      let user = db.users.find(u => u.email.toLowerCase() === email.toLowerCase());
-      if (!user) {
-        // Fallback for valid emails that aren't in the DB yet snippet.
-        // It simulates auto-registration on first login for demo purposes.
-        user = { 
-          id: `u${Date.now()}`, 
-          email, 
-          role: 'user', 
-          name: email.split('@')[0], 
-          status: 'active', 
-          avatar: `https://i.pravatar.cc/150?u=${Date.now()}` 
-        };
-        db.users.push(user);
+  // Email Specific Business Connection Model
+  app.post("/api/integrations/email/config", async (req, res) => {
+    const { apiKey, fromEmail } = req.body;
+    const eml = db.getIntegrationById('int-email');
+    if (!eml) return res.status(404).json({ error: "Email integration not found" });
+
+    eml.config = { ...eml.config, apiKey, fromEmail };
+
+    if (!apiKey || !fromEmail) {
+      eml.status = 'disconnected';
+      eml.lastError = null;
+      return res.json({ success: true, data: db.getIntegrations(), message: "Cleared configs" });
+    }
+
+    try {
+      // Test the SendGrid API Key
+      const sgRes = await fetch("https://api.sendgrid.com/v3/scopes", {
+        headers: { 'Authorization': `Bearer ${apiKey}` }
+      });
+      const sgData = await sgRes.json();
+
+      if (sgData.errors) {
+        eml.status = 'error';
+        eml.lastError = sgData.errors[0]?.message || "Invalid SendGrid API Key";
+        return res.json({ success: false, error: eml.lastError, data: db.getIntegrations() });
       }
-      res.json({ success: true, token: "mock_jwt_token_" + user.id, user });
-    } else {
-      res.status(401).json({ success: false, error: "Invalid credentials" });
+
+      eml.status = 'connected';
+      eml.lastError = null;
+      eml.last_sync = 'Just now';
+      res.json({ success: true, data: db.getIntegrations() });
+    } catch (err: any) {
+      eml.status = 'error';
+      eml.lastError = "Network error validating API Key";
+      res.json({ success: false, error: err.message, data: db.getIntegrations() });
     }
   });
 
-  app.post("/api/auth/register", (req, res) => {
-    const { email, name, password } = req.body;
-    if (email && name && password.length >= 6) {
-      if (db.users.find(u => u.email.toLowerCase() === email.toLowerCase())) {
-        return res.status(400).json({ success: false, error: "User already exists" });
-      }
+  // Email JSON Webhook Endpoint (For Receiving parsed emails from inbound webhook)
+  app.post("/api/webhooks/email", async (req, res) => {
+    const eml = db.getIntegrationById('int-email');
+    if (!eml || eml.status !== 'connected') {
+      return res.status(403).send("Email not connected");
+    }
+
+    const envelope = req.body;
+    const senderEmail = envelope.from || envelope.sender || envelope.From;
+    const msgText = envelope.text || envelope.TextBody || envelope.content || "Media/HTML Message";
+    const msgSubject = envelope.subject || envelope.Subject || "Support Request";
+
+    // Standardize object presence for db operations
+    if (senderEmail && typeof senderEmail === 'string') {
+      const parsedSender = senderEmail.replace(/<.*>/, '').trim(); 
+      let convo = db.getConversationsByPlatform('email', parsedSender);
       
-      const newUser = {
-        id: `u${Date.now()}`,
-        email,
-        name,
-        role: 'user', // Default role
-        status: 'active',
-        avatar: `https://i.pravatar.cc/150?u=${Date.now()}`
-      };
-      db.users.push(newUser);
-      res.json({ success: true, token: "mock_jwt_token_" + newUser.id, user: newUser });
+      if (!convo) {
+        convo = { 
+          id: Date.now(), name: parsedSender.split('@')[0], platform: 'email', color: 'bg-[#EA4335]', 
+          lastMsg: msgText, time: 'Just now', unread: true, identifier: parsedSender 
+        };
+        convo.id = db.createConversation(convo);
+      } else {
+        convo.lastMsg = msgText; convo.unread = true; convo.time = 'Just now'; db.updateConversation(convo.id, convo.lastMsg, convo.unread ? 1 : 0, convo.time);
+      }
+
+      db.createMessage({
+id: Date.now(), conversation_id: convo.id, content: `[${msgSubject}] ${msgText}`, sender_type: 'contact', created_at: new Date().toISOString()
+});
+
+      res.sendStatus(200);
+
+      try {
+        const aiRes = await ai.models.generateContent({
+          model: 'gemini-2.5-flash',
+          contents: `You are an AI assistant for a SaaS business. Reply to this customer email succinctly (1 short polite sentence): "${msgText}"`
+        });
+        const aiResponseText = aiRes.text;
+
+        db.createMessage({
+id: Date.now() + 1, conversation_id: convo.id, content: aiResponseText, sender_type: 'bot', created_at: new Date().toISOString() 
+});
+        convo.lastMsg = `AI Reply: ${String(aiResponseText).substring(0, 25)}...`;
+
+        await fetch(`https://api.sendgrid.com/v3/mail/send`, {
+          method: 'POST',
+          headers: { 
+            'Authorization': `Bearer ${eml.config.apiKey}`,
+            'Content-Type': 'application/json' 
+          },
+          body: JSON.stringify({
+            personalizations: [{ to: [{ email: parsedSender }] }],
+            from: { email: eml.config.fromEmail },
+            subject: `Re: ${msgSubject.replace('Re: ', '')}`,
+            content: [{ type: "text/plain", value: String(aiResponseText) }]
+          })
+        });
+        console.log("Successfully replied to Email webhook.");
+      } catch (e) {
+        console.error("Email AI routing error:", e);
+      }
     } else {
-      res.status(400).json({ success: false, error: "Invalid registration data. Password must be >6 chars." });
+      res.sendStatus(400); 
     }
   });
 
-  app.get("/api/auth/me", (req, res) => {
-    const authHeader = req.headers.authorization;
-    if (authHeader && authHeader.startsWith('Bearer mock_jwt_token_')) {
-      const userId = authHeader.replace('Bearer mock_jwt_token_', '');
-      const user = db.users.find(u => u.id === userId);
-      if (user) {
-        return res.json({ success: true, user });
+  // Shopify Specific Business Connection Model
+  app.post("/api/integrations/shopify/config", async (req, res) => {
+    const { shopDomain, accessToken } = req.body;
+    const shp = db.getIntegrationById('int-shopify');
+    if (!shp) return res.status(404).json({ error: "Shopify integration not found" });
+
+    shp.config = { ...shp.config, shopDomain, accessToken };
+
+    if (!shopDomain || !accessToken) {
+      shp.status = 'disconnected';
+      shp.lastError = null;
+      return res.json({ success: true, data: db.getIntegrations(), message: "Cleared configs" });
+    }
+
+    try {
+      const cleanDomain = shopDomain.replace(/^https?:\/\//, '').replace(/\/$/, '');
+      const shRes = await fetch(`https://${cleanDomain}/admin/api/2024-01/shop.json`, {
+        headers: { 'X-Shopify-Access-Token': accessToken }
+      });
+      const shData = await shRes.json();
+
+      if (!shRes.ok || shData.errors) {
+        shp.status = 'error';
+        shp.lastError = shData.errors ? JSON.stringify(shData.errors) : "Invalid Store Token";
+        return res.json({ success: false, error: shp.lastError, data: db.getIntegrations() });
+      }
+
+      shp.status = 'connected';
+      shp.lastError = null;
+      shp.last_sync = 'Just now';
+      res.json({ success: true, data: db.getIntegrations() });
+    } catch (err: any) {
+      shp.status = 'error';
+      shp.lastError = err.message || "Network Error";
+      res.json({ success: false, error: shp.lastError, data: db.getIntegrations() });
+    }
+  });
+
+  // Shopify Webhook Endpoint (e.g. customers/create, orders/create)
+  app.post("/api/webhooks/shopify", async (req, res) => {
+    const shp = db.getIntegrationById('int-shopify');
+    if (!shp || shp.status !== 'connected') {
+      return res.status(403).send("Shopify not connected");
+    }
+
+    const topic = req.headers['x-shopify-topic'];
+    const payload = req.body;
+
+    if (topic === 'customers/create' && payload) {
+        const lead = {
+            id: payload.id || Date.now(),
+            name: `${payload.first_name || ''} ${payload.last_name || ''}`.trim() || 'Shopify Customer',
+            contact: payload.email || payload.phone || 'No Contact Info',
+            value: payload.total_spent || '$0.00',
+            stage: 'awareness',
+            tags: ['Shopify', 'New Customer']
+        };
+        db.createLead(lead);
+        console.log("Processed Shopify Webhook: Created new Lead");
+    }
+
+    res.sendStatus(200);
+  });
+
+  // Webchat Connection Model
+  app.post("/api/integrations/webchat/config", async (req, res) => {
+    const { allowedDomains } = req.body;
+    const wc = db.getIntegrationById('int-webchat');
+    if (!wc) return res.status(404).json({ error: "Webchat integration not found" });
+
+    wc.config = { allowedDomains, widgetId: wc.config.widgetId || `wid_${Date.now()}` };
+    
+    if (!allowedDomains) {
+      wc.status = 'disconnected';
+      wc.lastError = null;
+      return res.json({ success: true, data: db.getIntegrations() });
+    }
+
+    wc.status = 'connected';
+    wc.lastError = null;
+    wc.last_sync = 'Just now';
+    res.json({ success: true, data: db.getIntegrations(), widgetId: wc.config.widgetId });
+  });
+
+  // Webchat Inbound Webhook (Called directly by the widget logic)
+  app.post("/api/webhooks/webchat", async (req, res) => {
+    const { widgetId, visitorId, message } = req.body;
+    const wc = db.getIntegrationById('int-webchat');
+    
+    if (!wc || wc.status !== 'connected' || wc.config.widgetId !== widgetId) {
+      return res.status(403).json({ error: "Unauthorized Widget" });
+    }
+
+    if (message) {
+      const senderName = visitorId ? `Visitor-${visitorId.substring(0,4)}` : "Website Visitor";
+      
+      let convo = db.getConversationsByPlatform('webchat', visitorId);
+      if (!convo) {
+        convo = { 
+          id: Date.now(), name: senderName, platform: 'webchat', color: 'bg-indigo-500', 
+          lastMsg: message, time: 'Just now', unread: true, identifier: visitorId 
+        };
+        convo.id = db.createConversation(convo);
+      } else {
+        convo.lastMsg = message; convo.unread = true; convo.time = 'Just now'; db.updateConversation(convo.id, convo.lastMsg, convo.unread ? 1 : 0, convo.time);
+      }
+
+      db.createMessage({
+id: Date.now(), conversation_id: convo.id, content: message, sender_type: 'contact', created_at: new Date().toISOString()
+});
+
+      // Simple AI auto-reply
+      try {
+        const aiRes = await ai.models.generateContent({
+          model: 'gemini-2.5-flash',
+          contents: `You are an AI assistant for a SaaS business on their website live chat. Reply succinctly (1 short sentence) to the visitor: "${message}"`
+        });
+        const aiResponseText = aiRes.text;
+
+        db.createMessage({
+id: Date.now() + 1, conversation_id: convo.id, content: aiResponseText, sender_type: 'bot', created_at: new Date().toISOString() 
+});
+        convo.lastMsg = `AI Reply: ${String(aiResponseText).substring(0, 25)}...`;
+
+        return res.json({ success: true, reply: aiResponseText });
+      } catch (e) {
+        console.error("Webchat AI error:", e);
+        return res.json({ success: true, reply: "Thanks for reaching out! We will be with you shortly." });
       }
     }
-    res.status(401).json({ success: false, error: "Invalid or expired token" });
+    
+    res.json({ success: true });
+  });
+
+  // Telegram Specific Business Connection Model
+  app.post("/api/integrations/telegram/config", async (req, res) => {
+    const { botToken, webhookUrl } = req.body;
+    const tg = db.getIntegrationById('int-telegram');
+    if (!tg) return res.status(404).json({ error: "Telegram integration not found" });
+
+    tg.config = { ...tg.config, botToken: botToken };
+
+    // Live validation against Telegram API
+    if (!botToken) {
+      tg.status = 'disconnected';
+      tg.lastError = null;
+      return res.json({ success: true, data: db.getIntegrations(), message: "Cleared configs" });
+    }
+
+    try {
+      // Test the token against Telegram API
+      const meRes = await fetch(`https://api.telegram.org/bot${botToken}/getMe`);
+      const meData = await meRes.json();
+
+      if (!meData.ok) {
+        tg.status = 'error';
+        tg.lastError = meData.description || "Invalid Bot Token";
+        return res.json({ success: false, error: tg.lastError, data: db.getIntegrations() });
+      }
+
+      // Automatically register the webhook
+      if (webhookUrl) {
+        const secretToken = tg.config.webhookSecret || 'tg_biz_secure_88';
+        const setWebhookRes = await fetch(`https://api.telegram.org/bot${botToken}/setWebhook`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            url: webhookUrl,
+            secret_token: secretToken
+          })
+        });
+        const webhookData = await setWebhookRes.json();
+        
+        if (!webhookData.ok) {
+          tg.status = 'error';
+          tg.lastError = "Webhook failed: " + webhookData.description;
+          return res.json({ success: false, error: tg.lastError, data: db.getIntegrations() });
+        }
+      }
+
+      tg.status = 'connected';
+      tg.lastError = null;
+      tg.last_sync = 'Just now';
+      res.json({ success: true, data: db.getIntegrations() });
+    } catch (err: any) {
+      tg.status = 'error';
+      tg.lastError = err.message;
+      res.json({ success: false, error: err.message, data: db.getIntegrations() });
+    }
+  });
+
+  // Telegram Webhook Endpoints
+  app.post("/api/webhooks/telegram", async (req, res) => {
+    const tg = db.getIntegrationById('int-telegram');
+    if (!tg || tg.status !== 'connected') {
+      return res.status(403).send("Telegram not connected");
+    }
+
+    // Verify secret token from Telegram
+    const secret = req.headers['x-telegram-bot-api-secret-token'];
+    if (secret !== tg.config.webhookSecret) {
+      return res.status(403).send("Unauthorized Webhook Call");
+    }
+
+    const { message } = req.body;
+    
+    if (message && message.text) {
+      const chatId = message.chat.id.toString();
+      const msgText = message.text;
+      const senderName = message.from.first_name || chatId;
+
+      // 1. Process INBOUND message into Database
+      let convo = db.getConversationsByPlatform('telegram', chatId);
+      if (!convo) {
+        convo = { 
+          id: Date.now(), name: senderName, platform: 'telegram', color: 'bg-[#0088cc]', 
+          lastMsg: msgText, time: 'Just now', unread: true, identifier: chatId 
+        };
+        convo.id = db.createConversation(convo);
+      } else {
+        convo.lastMsg = msgText; convo.unread = true; convo.time = 'Just now'; db.updateConversation(convo.id, convo.lastMsg, convo.unread ? 1 : 0, convo.time);
+      }
+
+      db.createMessage({
+id: Date.now(), conversation_id: convo.id, content: msgText, sender_type: 'contact', created_at: new Date().toISOString()
+});
+
+      // Acknowledge receipt to Telegram quickly
+      res.sendStatus(200);
+
+      // 2. Autonomous Auto-Reply using AI
+      try {
+        const aiRes = await ai.models.generateContent({
+          model: 'gemini-2.5-flash',
+          contents: `You are an AI assistant for a SaaS business. Respond to this customer request via Telegram succinctly (1 short polite sentence): "${msgText}"`
+        });
+        const aiResponseText = aiRes.text;
+
+        db.createMessage({
+id: Date.now() + 1, conversation_id: convo.id, content: aiResponseText, sender_type: 'bot', created_at: new Date().toISOString() 
+});
+        convo.lastMsg = `AI Reply: ${String(aiResponseText).substring(0, 25)}...`;
+
+        // 3. Send outbound via Telegram API
+        await fetch(`https://api.telegram.org/bot${tg.config.botToken}/sendMessage`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            chat_id: chatId,
+            text: aiResponseText
+          })
+        });
+        console.log("Successfully intercepted and replied to Telegram message.");
+      } catch (e) {
+        console.error("Telegram AI routing error:", e);
+      }
+    } else {
+      res.sendStatus(200); // Need to ack all webhook events
+    }
+  });
+
+  // WhatsApp Specific Business Connection Model
+  app.post("/api/integrations/whatsapp/config", async (req, res) => {
+    const { accessToken, phoneNumberId, verifyToken } = req.body;
+    const wa = db.getIntegrationById('int-whatsapp');
+    if (!wa) return res.status(404).json({ error: "WhatsApp integration not found" });
+
+    wa.config = { ...wa.config, accessToken, phoneNumberId, verifyToken: verifyToken || wa.config.verifyToken };
+    
+    // Live validation against Meta Graph API
+    if (!accessToken || !phoneNumberId) {
+      wa.status = 'disconnected';
+      wa.lastError = null;
+      return res.json({ success: true, data: db.getIntegrations(), message: "Cleared configs" });
+    }
+
+    try {
+      // Test the token against Meta
+      const verifyRes = await fetch(`https://graph.facebook.com/v18.0/${phoneNumberId}`, {
+        headers: { 'Authorization': `Bearer ${accessToken}` }
+      });
+      const data = await verifyRes.json();
+
+      if (data.error) {
+        wa.status = 'error';
+        wa.lastError = data.error.message;
+        return res.json({ success: false, error: data.error.message, code: data.error.code, data: db.getIntegrations() });
+      }
+
+      wa.status = 'connected';
+      wa.lastError = null;
+      wa.last_sync = 'Just now';
+      res.json({ success: true, data: db.getIntegrations() });
+    } catch (err: any) {
+      wa.status = 'error';
+      wa.lastError = err.message;
+      res.json({ success: false, error: err.message, data: db.getIntegrations() });
+    }
+  });
+
+  // WhatsApp Webhook Endpoints
+  app.get("/api/webhooks/whatsapp", (req, res) => {
+    const mode = req.query["hub.mode"];
+    const token = req.query["hub.verify_token"];
+    const challenge = req.query["hub.challenge"];
+
+    const wa = db.getIntegrationById('int-whatsapp');
+
+    if (mode && token) {
+      if (mode === "subscribe" && token === wa?.config?.verifyToken) {
+        console.log("WHATSAPP WEBHOOK VERIFIED!");
+        return res.status(200).send(challenge);
+      } else {
+        return res.sendStatus(403);
+      }
+    }
+    return res.status(400).send("Provide hub details");
+  });
+
+  app.post("/api/webhooks/whatsapp", async (req, res) => {
+    const body = req.body;
+    const wa = db.getIntegrationById('int-whatsapp');
+    
+    if (!wa || wa.status !== 'connected') {
+      return res.status(403).send("WhatsApp not connected");
+    }
+
+    if (body.object) {
+      if (body.entry && body.entry[0].changes && body.entry[0].changes[0].value.messages && body.entry[0].changes[0].value.messages[0]) {
+        const msg = body.entry[0].changes[0].value.messages[0];
+        const from = msg.from; 
+        const msg_body = msg.text ? msg.text.body : "Media message";
+        const msg_name = body.entry[0].changes[0].value.contacts?.[0]?.profile?.name || from;
+
+        // 1. Process inbound message into Database
+        let convo = db.getConversationsByPlatform('whatsapp', from);
+        if (!convo) {
+          convo = { 
+            id: Date.now(), name: msg_name, platform: 'whatsapp', color: 'bg-[#25D366]', 
+            lastMsg: msg_body, time: 'Just now', unread: true, identifier: from 
+          };
+          convo.id = db.createConversation(convo);
+        } else {
+          convo.lastMsg = msg_body; convo.unread = true; convo.time = 'Just now'; db.updateConversation(convo.id, convo.lastMsg, convo.unread ? 1 : 0, convo.time);
+        }
+        
+        const newMsg = { id: Date.now(), conversation_id: convo.id, content: msg_body, sender_type: 'contact', created_at: new Date().toISOString() };
+        db.createMessage(newMsg);
+
+        // Acknowledge receipt to Meta quickly to avoid retries
+        res.sendStatus(200);
+
+        // 2. Autonomous Auto-Reply using AI
+        try {
+          const aiRes = await ai.models.generateContent({
+            model: 'gemini-2.5-flash',
+            contents: `You are an AI assistant for a SaaS business. Respond to this customer request succinctly (1 short polite sentence): "${msg_body}"`
+          });
+          const aiResponseText = aiRes.text;
+
+          const aiMsgRecord = { id: Date.now() + 1, conversation_id: convo.id, content: aiResponseText, sender_type: 'bot', created_at: new Date().toISOString() };
+          db.createMessage(aiMsgRecord);
+          convo.lastMsg = `AI Reply: ${String(aiResponseText).substring(0, 25)}...`;
+
+          // 3. Send outbound via Meta Graph API
+          await fetch(`https://graph.facebook.com/v18.0/${wa.config.phoneNumberId}/messages`, {
+            method: 'POST',
+            headers: { 
+              'Authorization': `Bearer ${wa.config.accessToken}`, 
+              'Content-Type': 'application/json' 
+            },
+            body: JSON.stringify({
+              messaging_product: 'whatsapp',
+              to: from,
+              text: { body: aiResponseText }
+            })
+          });
+          console.log("Successfully intercepted and replied to WhatsApp message.");
+        } catch(e) {
+          console.error("AI or Send Error for Webhook:", e);
+        }
+      } else {
+        // Meta sends other events (statuses, read receipts), ack them
+        res.sendStatus(200);
+      }
+    } else {
+      res.sendStatus(404);
+    }
+  });
+
+  // Current Auth User
+  app.get("/api/auth/me", (req, res) => {
+    const user = db.getUserById((req as any).user.uid);
+    res.json({ success: true, user });
   });
 
   // Admin User Endpoints
-  app.get("/api/admin/users", (req, res) => res.json({ data: db.users }));
+  app.get("/api/admin/users", requireRole(["owner", "admin"]), (req, res) => res.json({ data: db.getUsers() }));
   
-  app.post("/api/admin/users/role", (req, res) => {
+  app.post("/api/admin/users/role", requireRole(["owner", "admin"]), (req, res) => {
     const { id, role } = req.body;
     if (!['owner', 'admin', 'user'].includes(role)) {
        return res.status(400).json({ success: false, error: "Invalid role" });
     }
-    const targetUser = db.users.find(u => u.id === id);
+    const targetUser = db.getUserById(id);
     if (targetUser) {
       targetUser.role = role;
-      res.json({ success: true, data: db.users });
+      res.json({ success: true, data: db.getUsers() });
     } else {
       res.status(404).json({ success: false, error: "User not found" });
     }
@@ -191,48 +634,48 @@ async function startServer() {
 
   // Settings / Workspace Isolation
   app.get("/api/settings", (req, res) => {
-    res.json({ success: true, data: db.settings });
+    res.json({ success: true, data: db.getKV('settings') });
   });
   
-  app.put("/api/settings", (req, res) => {
+  app.put("/api/settings", requireRole(["owner", "admin"]), (req, res) => {
     const updates = req.body;
-    db.settings = { ...db.settings, ...updates };
-    res.json({ success: true, data: db.settings });
+    db.setKV('settings', { ...db.getKV('settings'), ...updates });
+    res.json({ success: true, data: db.getKV('settings') });
   });
 
   // Billing
-  app.get("/api/billing", (req, res) => res.json({ data: db.billing }));
+  app.get("/api/billing", (req, res) => res.json({ data: db.getKV('billing') }));
   app.post("/api/billing/upgrade", (req, res) => {
     const { newPlan } = req.body;
-    db.billing.plan = newPlan;
+    const b = db.getKV('billing'); b.plan = newPlan; db.setKV('billing', b);
     // Reset or bump limits depending on plan
     if (newPlan === 'enterprise_plus') {
-      db.billing.usage.ai_words.limit = 2000000;
-      db.billing.usage.contacts.limit = 250000;
+      const b2 = db.getKV('billing'); b2.usage.ai_words.limit = 2000000; db.setKV('billing', b2);
+      const b3 = db.getKV('billing'); b3.usage.contacts.limit = 250000; db.setKV('billing', b3);
     }
-    res.json({ success: true, data: db.billing });
+    res.json({ success: true, data: db.getKV('billing') });
   });
   app.post("/api/billing/downgrade", (req, res) => {
     const { newPlan } = req.body;
-    db.billing.plan = newPlan;
+    const b = db.getKV('billing'); b.plan = newPlan; db.setKV('billing', b);
     if (newPlan === 'starter') {
-      db.billing.usage.ai_words.limit = 50000;
-      db.billing.usage.contacts.limit = 5000;
+      const b2 = db.getKV('billing'); b2.usage.ai_words.limit = 50000; db.setKV('billing', b2);
+      const b3 = db.getKV('billing'); b3.usage.contacts.limit = 5000; db.setKV('billing', b3);
     }
-    res.json({ success: true, data: db.billing });
+    res.json({ success: true, data: db.getKV('billing') });
   });
 
   // Dashboard Metrics
   app.get("/api/dashboard/metrics", (req, res) => {
     // Generate actual metrics from our in-memory "database"
-    const openLeads = db.leads.length;
-    const pipelineValue = db.leads.reduce((acc, lead) => {
+    const openLeads = db.getLeads().length;
+    const pipelineValue = db.getLeads().reduce((acc, lead) => {
       // safely parse string like "$45,000"
       const val = parseInt(lead.value.replace(/[^0-9.-]+/g, '')) || 0;
       return acc + val;
     }, 0);
-    const unreadMessages = db.conversations.filter(c => c.unread).length;
-    const activeCampaigns = db.campaigns.filter(c => c.status === 'sending').length;
+    const unreadMessages = db.getConversations().filter(c => c.unread).length;
+    const activeCampaigns = db.getCampaigns().filter(c => c.status === 'sending').length;
 
     res.json({
       success: true,
@@ -249,26 +692,84 @@ async function startServer() {
   });
 
   // Automations
-  app.get("/api/automations", (req, res) => res.json({ data: db.automations }));
+  app.get("/api/automations", (req, res) => res.json({ data: db.getAutomations() }));
   app.post("/api/automations", (req, res) => {
     const { name, trigger, action } = req.body;
     const newRule = { id: Date.now(), name, trigger, action, status: 'active', executions: 0 };
-    db.automations.push(newRule);
+    db.createAutomation(newRule);
     res.json({ success: true, data: newRule });
+  });
+  
+  app.put("/api/automations/:id/toggle", (req, res) => {
+    const rule = db.getAutomationById(parseInt(req.params.id));
+    if (rule) {
+      rule.status = rule.status === 'active' ? 'paused' : 'active';
+      res.json({ success: true, data: db.getAutomations() });
+    } else {
+      res.status(404).json({ success: false, error: "Rule not found" });
+    }
   });
 
   // Helpdesk Tickets
-  app.get("/api/tickets", (req, res) => res.json({ data: db.tickets }));
+  app.get("/api/tickets", (req, res) => res.json({ data: db.getTickets() }));
   app.post("/api/tickets", (req, res) => {
     const { subject, priority } = req.body;
     const newTicket = { id: Date.now(), subject, status: 'open', priority: priority || 'medium', user: 'admin@bizos.test', created_at: 'Just now' };
-    db.tickets.unshift(newTicket); // Add to top
+    db.createTicket(newTicket); // Add to top
     res.json({ success: true, data: newTicket });
+  });
+  
+  app.put("/api/tickets/:id/resolve", (req, res) => {
+    const ticket = db.getTicketById(parseInt(req.params.id));
+    if (ticket) {
+      ticket.status = 'resolved';
+      res.json({ success: true });
+    } else {
+      res.status(404).json({ success: false, error: "Ticket not found" });
+    }
   });
 
   // Call Center
   app.get("/api/calls", (req, res) => {
-    res.json({ data: db.calls });
+    res.json({ data: db.getCalls() });
+  });
+
+  app.post("/api/calls", async (req, res) => {
+    const { contact, type } = req.body;
+    
+    // Generate AI Summary and Transcript mock
+    let transcript = '';
+    let ai_summary = '';
+    
+    if (type !== 'missed') {
+      try {
+        const aiRes = await ai.models.generateContent({
+          model: 'gemini-2.5-flash',
+          contents: `Create a highly realistic 1-sentence transcript excerpt of a business call with a client named ${contact}. Then provide a 5-word action summary. Return JSON: {"transcript": "...", "ai_summary": "..."}`
+        });
+        const cleaned = aiRes.text?.replace(/```json/g, '').replace(/```/g, '');
+        const parsed = JSON.parse(cleaned || '{}');
+        transcript = parsed.transcript || `Discussed the recent updates with ${contact}.`;
+        ai_summary = parsed.ai_summary || "Follow up required next week.";
+      } catch (e) {
+        transcript = `Discussed the recent updates with ${contact}.`;
+        ai_summary = "General check-in completed.";
+      }
+    }
+
+    const newCall = {
+      id: Date.now(),
+      contact: contact || 'Unknown Caller',
+      type: type || 'outbound',
+      duration: type === 'missed' ? '00:00' : `${Math.floor(Math.random() * 10 + 1)}:${Math.floor(Math.random() * 50 + 10)}`,
+      status: type === 'missed' ? 'missed' : 'completed',
+      transcript,
+      ai_summary,
+      time: 'Just now'
+    };
+
+    db.createCall(newCall);
+    res.json({ success: true, data: newCall });
   });
 
   // AI Strategist
@@ -300,7 +801,7 @@ Strategist:`;
 
   // Campaigns
   app.get("/api/campaigns", (req, res) => {
-    res.json({ data: db.campaigns });
+    res.json({ data: db.getCampaigns() });
   });
 
   app.post("/api/campaigns", (req, res) => {
@@ -321,29 +822,25 @@ Strategist:`;
     
     // Move from sending to completed after a delay (mocking the background job)
     setTimeout(() => {
-      const idx = db.campaigns.findIndex(c => c.id === newCampaign.id);
-      if (idx !== -1) {
-        db.campaigns[idx].status = 'completed';
-        db.campaigns[idx].opens = Math.floor(db.campaigns[idx].sent * 0.4);
-      }
+      db.updateCampaign(newCampaign.id, 'completed', Math.floor(newCampaign.sent * 0.4), (newCampaign as any).clicks || 0);
     }, 5000);
 
-    db.campaigns.unshift(newCampaign);
+    db.createCampaign(newCampaign);
     res.json({ success: true, data: newCampaign });
   });
 
   // Conversations (Inbox Flow)
   app.get("/api/conversations", (req, res) => {
-    res.json({ data: db.conversations });
+    res.json({ data: db.getConversations() });
   });
 
   // Messages
   app.get("/api/conversations/:id/messages", (req, res) => {
-    const threadMsgs = db.messages.filter(m => m.conversation_id === parseInt(req.params.id));
+    const threadMsgs = db.getMessagesByConvo(parseInt(req.params.id));
     res.json({ data: threadMsgs });
   });
 
-  // Send Message (AI Flow Trigger)
+  // Send Message (AI Flow Trigger & Outbound Channel dispatch)
   app.post("/api/messages", async (req, res) => {
     const { conversation_id, content, sender_type } = req.body;
     
@@ -355,15 +852,15 @@ Strategist:`;
       sender_type: sender_type || 'contact',
       created_at: new Date().toISOString()
     };
-    db.messages.push(newMessage);
+    db.createMessage(newMessage);
     
     // Update thread "lastMsg"
-    const convo = db.conversations.find(c => c.id === parseInt(conversation_id));
+    const convo = (db.getConversations().find(c => c.id === parseInt(conversation_id)));
     if (convo) convo.lastMsg = content;
 
     let aiResponseText = null;
 
-    // AI Auto-Reply simple engine
+    // AI Auto-Reply simple engine (Only trigger if sent by contact, not agent)
     if (sender_type === 'contact') {
       try {
         const response = await ai.models.generateContent({
@@ -381,20 +878,95 @@ Strategist:`;
           sender_type: 'bot',
           created_at: new Date().toISOString()
         };
-        db.messages.push(aiMessage);
-        if (convo) convo.lastMsg = `AI Reply: ${aiResponseText.substring(0,25)}...`;
+        db.createMessage(aiMessage);
+        if (convo) convo.lastMsg = `AI Reply: ${String(aiResponseText).substring(0,25)}...`;
 
       } catch (err) {
         console.error("AI Generation Error:", err);
         // Fallback if API key fails
         aiResponseText = "Thanks for your message. An agent will be with you shortly.";
-        db.messages.push({
-          id: Date.now() + 1,
+        db.createMessage({
+id: Date.now() + 1,
           conversation_id: parseInt(conversation_id),
           content: aiResponseText,
           sender_type: 'bot',
           created_at: new Date().toISOString()
-        });
+});
+      }
+    } 
+    // Handle Human Agent Outbound Messages specifically matching Live Integrations
+    else if (sender_type === 'bot' || sender_type === 'agent') {
+      const waLog = db.getIntegrationById('int-whatsapp');
+      const tgLog = db.getIntegrationById('int-telegram');
+      const emLog = db.getIntegrationById('int-email');
+      const wcLog = db.getIntegrationById('int-webchat');
+      
+      if (convo && convo.platform === 'whatsapp' && convo.identifier && waLog?.status === 'connected') {
+        try {
+          const waRes = await fetch(`https://graph.facebook.com/v18.0/${waLog.config.phoneNumberId}/messages`, {
+            method: 'POST',
+            headers: { 
+              'Authorization': `Bearer ${waLog.config.accessToken}`, 
+              'Content-Type': 'application/json' 
+            },
+            body: JSON.stringify({
+              messaging_product: 'whatsapp',
+              to: convo.identifier,
+              text: { body: content }
+            })
+          });
+          const waData = await waRes.json();
+          if (waData.error) {
+            console.error("WhatsApp Send Error:", waData.error);
+          }
+        } catch (e) {
+          console.error("WhatsApp Network Error:", e);
+        }
+      }
+      else if (convo && convo.platform === 'telegram' && convo.identifier && tgLog?.status === 'connected') {
+         try {
+            const tgRes = await fetch(`https://api.telegram.org/bot${tgLog.config.botToken}/sendMessage`, {
+               method: 'POST',
+               headers: { 'Content-Type': 'application/json' },
+               body: JSON.stringify({
+                 chat_id: convo.identifier,
+                 text: content
+               })
+            });
+            const tgData = await tgRes.json();
+            if (!tgData.ok) {
+              console.error("Telegram Send Error:", tgData.description);
+            }
+         } catch(e) {
+            console.error("Telegram Network Error:", e);
+         }
+      }
+      else if (convo && convo.platform === 'email' && convo.identifier && emLog?.status === 'connected') {
+         try {
+            const emRes = await fetch(`https://api.sendgrid.com/v3/mail/send`, {
+               method: 'POST',
+               headers: { 
+                 'Authorization': `Bearer ${emLog.config.apiKey}`,
+                 'Content-Type': 'application/json' 
+               },
+               body: JSON.stringify({
+                 personalizations: [{ to: [{ email: convo.identifier }] }],
+                 from: { email: emLog.config.fromEmail },
+                 subject: "Update from Support",
+                 content: [{ type: "text/plain", value: content }]
+               })
+            });
+            if (!emRes.ok) {
+               const emData = await emRes.json();
+               console.error("Email API Scope/Send Error:", emData);
+            }
+         } catch(e) {
+            console.error("Email Provider Network Error:", e);
+         }
+      }
+      else if (convo && convo.platform === 'webchat' && convo.identifier && wcLog?.status === 'connected') {
+         // Simulated push to webchat widget (usually involves WS/SSE or db polling by widget)
+         console.log("Webchat simulated push to visitor:", content);
       }
     }
 
@@ -403,13 +975,27 @@ Strategist:`;
 
   // CRM Leads
   app.get("/api/leads", (req, res) => {
-    res.json({ data: db.leads });
+    res.json({ data: db.getLeads() });
+  });
+
+  app.post("/api/leads", (req, res) => {
+    const { name, contact, value, stage, tags } = req.body;
+    const newLead = { 
+      id: Date.now(), 
+      name, 
+      contact, 
+      value, 
+      stage: stage || 'awareness', 
+      tags: tags || ['New'] 
+    };
+    db.createLead(newLead);
+    res.json({ success: true, lead: newLead });
   });
 
   // Update Lead Stage
   app.put("/api/leads/:id", (req, res) => {
     const { stage } = req.body;
-    const lead = db.leads.find(l => l.id === parseInt(req.params.id));
+    const lead = db.getLeadById(parseInt(req.params.id));
     if (lead) {
       lead.stage = stage;
       res.json({ success: true, lead });
@@ -418,25 +1004,40 @@ Strategist:`;
     }
   });
 
-  // --- Vite Middleware for Development ---
-  if (process.env.NODE_ENV !== "production") {
-    const vite = await createViteServer({
-      server: { middlewareMode: true },
-      appType: "spa",
-    });
-    app.use(vite.middlewares);
-  } else {
-    const distPath = path.join(process.cwd(), 'dist');
-    app.use(express.static(distPath));
-    app.get('*', (req, res) => {
-      res.sendFile(path.join(distPath, 'index.html'));
-    });
-  }
+  
+    const httpServer = http.createServer(app);
+    const io = new SocketIOServer(httpServer, { cors: { origin: '*' } });
 
-  // --- Start Server ---
-  app.listen(PORT, "0.0.0.0", () => {
-    console.log(`Server running on port ${PORT}`);
-  });
+    io.use((socket, next) => {
+        const wsId = socket.handshake.query.workspaceId;
+        if (wsId) {
+            socket.join(wsId);
+        }
+        next();
+    });
+
+    (global as any).io = io;
+
+    // --- Vite Middleware for Development ---
+    if (process.env.NODE_ENV !== "production") {
+        const vite = await createViteServer({
+        server: { middlewareMode: true },
+        appType: "spa",
+        });
+        app.use(vite.middlewares);
+    } else {
+        const distPath = path.join(process.cwd(), 'dist');
+        app.use(express.static(distPath));
+        app.get('*', (req, res) => {
+        res.sendFile(path.join(distPath, 'index.html'));
+        });
+    }
+
+    // --- Start Server ---
+    httpServer.listen(PORT, "0.0.0.0", () => {
+        console.log(`Server running on port ${PORT}`);
+    });
+    
 }
 
 startServer();

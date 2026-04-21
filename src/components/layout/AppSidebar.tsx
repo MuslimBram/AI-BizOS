@@ -170,6 +170,9 @@ export function AppSidebar() {
     "Main": true,
     "Contact Center": true,
     "Growth & AI Core": true,
+    "Optimization AI": true,
+    "Intelligence": true,
+    "Engagement": true,
     "Integrations": true,
     "Business & Billing": true,
     "Admin": isSuperAdmin

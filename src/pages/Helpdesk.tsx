@@ -1,3 +1,4 @@
+import { apiFetch } from '../lib/api';
 import { useState, useEffect } from 'react';
 import { LifeBuoy, Plus, Search, CheckCircle2, Clock, AlertCircle } from 'lucide-react';
 import { Button } from '@/components/ui/button';
@@ -11,7 +12,7 @@ export function Helpdesk() {
   const [newTicket, setNewTicket] = useState({ subject: '', priority: 'low' });
 
   useEffect(() => {
-    fetch('/api/tickets')
+    apiFetch('/api/tickets')
       .then(res => res.json())
       .then(data => setTickets(data.data || []));
   }, []);
@@ -19,7 +20,7 @@ export function Helpdesk() {
   const handleCreate = async () => {
     if (!newTicket.subject) return;
     
-    const res = await fetch('/api/tickets', {
+    const res = await apiFetch('/api/tickets', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(newTicket)
@@ -30,6 +31,18 @@ export function Helpdesk() {
       setTickets([data.data, ...tickets]);
       setIsOpen(false);
       setNewTicket({ subject: '', priority: 'low' });
+    }
+  };
+
+  const handleResolve = async (id: number) => {
+    setTickets(prev => prev.map(t => t.id === id ? { ...t, status: 'resolved' } : t));
+    try {
+      await apiFetch(`/api/tickets/${id}/resolve`, { method: 'PUT' });
+    } catch(e) {
+      console.error(e);
+      // fallback
+      const data = await apiFetch('/api/tickets').then(res => res.json());
+      setTickets(data.data || []);
     }
   };
 
@@ -48,10 +61,8 @@ export function Helpdesk() {
         </div>
         
         <Dialog open={isOpen} onOpenChange={setIsOpen}>
-          <DialogTrigger asChild>
-            <Button size="sm" className="h-8 text-xs font-semibold">
-              <Plus className="w-3.5 h-3.5 mr-1" /> Open Ticket
-            </Button>
+          <DialogTrigger className="inline-flex items-center justify-center rounded-[min(var(--radius-md),12px)] border border-transparent text-sm transition-all focus-visible:ring-3 disabled:pointer-events-none disabled:opacity-50 group/button shrink-0 bg-primary text-primary-foreground hover:bg-primary/80 h-8 px-2.5 font-semibold">
+            <Plus className="w-3.5 h-3.5 mr-1" /> Open Ticket
           </DialogTrigger>
           <DialogContent>
             <DialogHeader>
@@ -128,7 +139,16 @@ export function Helpdesk() {
                       </Badge>
                     </td>
                     <td className="px-6 py-4 text-muted-foreground text-xs">{ticket.user}</td>
-                    <td className="px-6 py-4 text-right text-muted-foreground text-xs">{ticket.created_at}</td>
+                    <td className="px-6 py-4 text-right text-muted-foreground text-xs">
+                      <div className="flex items-center justify-end gap-3">
+                        <span>{ticket.created_at}</span>
+                        {ticket.status !== 'resolved' && (
+                          <Button onClick={() => handleResolve(ticket.id)} size="sm" variant="ghost" className="h-6 px-2 text-[10px] bg-emerald-500/10 text-emerald-500 hover:bg-emerald-500/20 hover:text-emerald-600">
+                            Resolve
+                          </Button>
+                        )}
+                      </div>
+                    </td>
                   </tr>
                 ))}
                 {tickets.length === 0 && (

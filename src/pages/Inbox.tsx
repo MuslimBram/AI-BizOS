@@ -1,4 +1,6 @@
+import { apiFetch } from '../lib/api';
 import { useState, useEffect } from 'react';
+import { io } from 'socket.io-client';
 import { Search, Filter, MoreVertical, Phone, Video, Info, Send, Bot, Paperclip, Smile, Loader2 } from 'lucide-react';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { ScrollArea } from '@/components/ui/scroll-area';
@@ -11,17 +13,42 @@ export function Inbox() {
   const [isSending, setIsSending] = useState(false);
 
   useEffect(() => {
-    fetch('/api/conversations')
+    // 1. WebSocket Setup
+    const wsId = localStorage.getItem('active_workspace_id') || 'ws-bizos-001';
+    const socket = io({ query: { workspaceId: wsId } });
+
+    socket.on('new_message', (msg: any) => {
+      // If it's for the currently active thread, append to the UI immediately
+      setMessages(prev => {
+        if (prev.find(m => m.id === msg.id || (m.tempId && m.content === msg.content))) return prev; // Dedupe
+        if (msg.conversation_id === activeThread?.id) {
+          return [...prev, msg];
+        }
+        return prev;
+      });
+
+      // Also refresh the threads list to show the latest snippet
+      apiFetch('/api/conversations')
+        .then(res => res.json())
+        .then(data => setThreads(data.data || []));
+    });
+
+    // 2. Fetch Initial Threads
+    apiFetch('/api/conversations')
       .then(res => res.json())
       .then(data => {
         setThreads(data.data || []);
-        if (data.data?.length > 0) setActiveThread(data.data[0]);
+        if (data.data?.length > 0 && !activeThread) setActiveThread(data.data[0]);
       });
-  }, []);
+
+    return () => {
+      socket.disconnect();
+    };
+  }, [activeThread?.id]);
 
   useEffect(() => {
     if (activeThread?.id) {
-      fetch(`/api/conversations/${activeThread.id}/messages`)
+      apiFetch(`/api/conversations/${activeThread.id}/messages`)
         .then(res => res.json())
         .then(data => setMessages(data.data || []));
     }
@@ -39,7 +66,7 @@ export function Inbox() {
     setMessages(prev => [...prev, { id: tempId, content, sender_type: 'contact', created_at: new Date().toISOString() }]);
 
     try {
-      const res = await fetch('/api/messages', {
+      const res = await apiFetch('/api/messages', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -51,12 +78,12 @@ export function Inbox() {
       const data = await res.json();
       
       // Reload messages to get the human confirmation & AI reply
-      const msgsRes = await fetch(`/api/conversations/${activeThread.id}/messages`);
+      const msgsRes = await apiFetch(`/api/conversations/${activeThread.id}/messages`);
       const msgsData = await msgsRes.json();
       setMessages(msgsData.data || []);
       
       // Refresh thread list to update 'lastMsg' snippet
-      const ctxRes = await fetch('/api/conversations');
+      const ctxRes = await apiFetch('/api/conversations');
       const ctxData = await ctxRes.json();
       setThreads(ctxData.data || []);
       

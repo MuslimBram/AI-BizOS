@@ -1,3 +1,4 @@
+import { apiFetch } from '../lib/api';
 import { useState, useEffect, useRef } from 'react';
 import { Send, Bot, BrainCircuit, Loader2, Target, BarChart, Sparkles } from 'lucide-react';
 import { Avatar, AvatarFallback } from '@/components/ui/avatar';
@@ -33,7 +34,7 @@ export function AIStrategist() {
     setIsTyping(true);
 
     try {
-      const res = await fetch('/api/ai/strategist', {
+      const res = await apiFetch('/api/ai/strategist', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ 

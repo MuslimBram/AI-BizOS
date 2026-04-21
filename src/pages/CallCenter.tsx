@@ -1,18 +1,49 @@
+import { apiFetch } from '../lib/api';
 import { useState, useEffect } from 'react';
-import { Phone, PhoneIncoming, PhoneOutgoing, PhoneMissed, Play, Pause, MoreVertical, LayoutGrid, Clock } from 'lucide-react';
+import { Phone, PhoneIncoming, PhoneOutgoing, PhoneMissed, Play, Pause, MoreVertical, LayoutGrid, Clock, PhoneCall, Loader2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Avatar, AvatarFallback } from '@/components/ui/avatar';
 import { ScrollArea } from '@/components/ui/scroll-area';
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
+import { Input } from '@/components/ui/input';
 
 export function CallCenter() {
   const [calls, setCalls] = useState<any[]>([]);
+  const [isDialpadOpen, setIsDialpadOpen] = useState(false);
+  const [phoneNumber, setPhoneNumber] = useState('');
+  const [isCalling, setIsCalling] = useState(false);
 
   useEffect(() => {
-    fetch('/api/calls')
+    apiFetch('/api/calls')
       .then(res => res.json())
       .then(data => setCalls(data.data || []));
   }, []);
+
+  const handleSimulateCall = async () => {
+    if (!phoneNumber) return;
+    setIsCalling(true);
+    
+    try {
+      const res = await apiFetch('/api/calls', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ contact: phoneNumber, type: 'outbound' })
+      });
+      const data = await res.json();
+      if (data.success) {
+        setCalls([data.data, ...calls]);
+        setIsDialpadOpen(false);
+        setPhoneNumber('');
+      }
+    } catch(e) {
+      console.error("Failed to generate call log", e);
+    } finally {
+      setIsCalling(false);
+    }
+  };
+
+  const dialpadNumbers = ['1', '2', '3', '4', '5', '6', '7', '8', '9', '*', '0', '#'];
 
   return (
     <div className="flex flex-col h-full bg-background overflow-hidden">
@@ -23,9 +54,47 @@ export function CallCenter() {
           <h2 className="text-sm font-semibold">Call Center & WebRTC Analytics</h2>
         </div>
         <div className="flex items-center gap-2">
-          <Button variant="outline" size="sm" className="h-8 text-xs font-semibold">
-            <LayoutGrid className="w-3.5 h-3.5 mr-2" /> Dialpad
-          </Button>
+          
+          <Dialog open={isDialpadOpen} onOpenChange={setIsDialpadOpen}>
+            <DialogTrigger className="inline-flex items-center justify-center rounded-[min(var(--radius-md),12px)] border border-input bg-background hover:bg-accent hover:text-accent-foreground text-sm transition-all focus-visible:ring-3 focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-50 h-8 px-2.5 font-semibold">
+              <LayoutGrid className="w-3.5 h-3.5 mr-2" /> Dialpad
+            </DialogTrigger>
+            <DialogContent className="sm:max-w-[320px]">
+              <DialogHeader>
+                <DialogTitle className="text-center">Make a Call</DialogTitle>
+              </DialogHeader>
+              <div className="flex flex-col items-center gap-4 py-4">
+                <Input 
+                  value={phoneNumber}
+                  onChange={(e) => setPhoneNumber(e.target.value)}
+                  placeholder="(555) 000-0000"
+                  className="text-center text-xl tracking-wider h-12 font-semibold bg-muted/50"
+                />
+                
+                <div className="grid grid-cols-3 gap-3 w-full px-4">
+                  {dialpadNumbers.map(num => (
+                    <button 
+                      key={num}
+                      onClick={() => setPhoneNumber(prev => prev + num)}
+                      className="h-14 rounded-full bg-muted/50 hover:bg-muted text-xl font-medium flex items-center justify-center transition-colors"
+                    >
+                      {num}
+                    </button>
+                  ))}
+                </div>
+                
+                <Button 
+                  onClick={handleSimulateCall} 
+                  disabled={!phoneNumber || isCalling}
+                  className="w-16 h-16 rounded-full bg-emerald-500 hover:bg-emerald-600 mt-2 text-white shadow-lg"
+                >
+                  {isCalling ? <Loader2 className="w-6 h-6 animate-spin" /> : <PhoneCall className="w-6 h-6" />}
+                </Button>
+                {isCalling && <div className="text-xs text-muted-foreground animate-pulse text-center mt-2">AI is answering and transcribing...</div>}
+              </div>
+            </DialogContent>
+          </Dialog>
+
           <Button size="sm" className="h-8 text-xs bg-emerald-500 hover:bg-emerald-600 text-white shadow-sm">
             Available Online
           </Button>

@@ -1,3 +1,4 @@
+import { apiFetch } from '../lib/api';
 import { useState, useEffect } from 'react';
 import { Bot, Activity, BrainCircuit, ShieldCheck, CheckCircle2, Moon } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
@@ -8,7 +9,7 @@ export function AutonomousOS() {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    fetch('/api/agents')
+    apiFetch('/api/agents')
       .then(res => res.json())
       .then(data => {
         setAgents(data.data || []);

@@ -1,3 +1,4 @@
+import { apiFetch } from '../lib/api';
 import { useState, useEffect } from 'react';
 import { Workflow, Plus, Play, Pause, Settings2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
@@ -10,7 +11,7 @@ export function Automations() {
   const [newAuto, setNewAuto] = useState({ name: '', trigger: '', action: '' });
 
   useEffect(() => {
-    fetch('/api/automations')
+    apiFetch('/api/automations')
       .then(res => res.json())
       .then(data => setAutomations(data.data || []));
   }, []);
@@ -18,7 +19,7 @@ export function Automations() {
   const handleCreate = async () => {
     if (!newAuto.name || !newAuto.trigger || !newAuto.action) return;
     
-    const res = await fetch('/api/automations', {
+    const res = await apiFetch('/api/automations', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(newAuto)
@@ -32,6 +33,21 @@ export function Automations() {
     }
   };
 
+  const handleToggle = async (id: number) => {
+    // Optimistic
+    setAutomations(prev => prev.map(a => a.id === id ? { ...a, status: a.status === 'active' ? 'paused' : 'active' } : a));
+    
+    try {
+      await apiFetch(`/api/automations/${id}/toggle`, { method: 'PUT' });
+    } catch(e) {
+      console.error(e);
+      // Revert optimistic on fail
+      const res = await apiFetch('/api/automations');
+      const data = await res.json();
+      setAutomations(data.data || []);
+    }
+  };
+
   return (
     <div className="flex flex-col h-full bg-background overflow-hidden">
       <div className="flex h-14 shrink-0 items-center justify-between border-b px-4">
@@ -41,10 +57,8 @@ export function Automations() {
         </div>
         
         <Dialog open={isOpen} onOpenChange={setIsOpen}>
-          <DialogTrigger asChild>
-            <Button size="sm" className="h-8 text-xs font-semibold">
-              <Plus className="w-3.5 h-3.5 mr-1" /> New Automation
-            </Button>
+          <DialogTrigger className="inline-flex items-center justify-center rounded-[min(var(--radius-md),12px)] border border-transparent text-sm transition-all focus-visible:ring-3 disabled:pointer-events-none disabled:opacity-50 group/button shrink-0 bg-primary text-primary-foreground hover:bg-primary/80 h-8 px-2.5 font-semibold">
+            <Plus className="w-3.5 h-3.5 mr-1" /> New Automation
           </DialogTrigger>
           <DialogContent>
             <DialogHeader>
@@ -94,11 +108,11 @@ export function Automations() {
                 </div>
                 <div className="flex items-center gap-2">
                   {auto.status === 'active' ? (
-                    <Button size="sm" variant="outline" className="h-8 text-xs text-rose-500 hover:text-rose-600 bg-rose-500/10 hover:bg-rose-500/20 border-rose-500/20">
+                    <Button onClick={() => handleToggle(auto.id)} size="sm" variant="outline" className="h-8 text-xs text-rose-500 hover:text-rose-600 bg-rose-500/10 hover:bg-rose-500/20 border-rose-500/20">
                       <Pause className="w-3.5 h-3.5 mr-1.5" /> Pause
                     </Button>
                   ) : (
-                    <Button size="sm" variant="outline" className="h-8 text-xs text-emerald-500 hover:text-emerald-600 bg-emerald-500/10 hover:bg-emerald-500/20 border-emerald-500/20">
+                    <Button onClick={() => handleToggle(auto.id)} size="sm" variant="outline" className="h-8 text-xs text-emerald-500 hover:text-emerald-600 bg-emerald-500/10 hover:bg-emerald-500/20 border-emerald-500/20">
                       <Play className="w-3.5 h-3.5 mr-1.5" /> Resume
                     </Button>
                   )}

@@ -1,3 +1,4 @@
+import { apiFetch } from '../lib/api';
 import { useState, useEffect } from 'react';
 import { Shield, ShieldAlert, ShieldCheck, Mail, UserPlus, CheckCircle2, MoreVertical, Activity } from 'lucide-react';
 import { Button } from '@/components/ui/button';
@@ -17,7 +18,7 @@ export function AdminPanel() {
 
   const fetchUsers = async () => {
     try {
-      const res = await fetch('/api/admin/users');
+      const res = await apiFetch('/api/admin/users');
       const data = await res.json();
       setUsers(data.data || []);
     } finally {
@@ -30,7 +31,7 @@ export function AdminPanel() {
     setUsers(users.map(u => u.id === id ? { ...u, role: newRole } : u));
     
     // API Call
-    await fetch('/api/admin/users/role', {
+    await apiFetch('/api/admin/users/role', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ id, role: newRole })

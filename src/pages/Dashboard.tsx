@@ -1,3 +1,4 @@
+import { apiFetch } from '../lib/api';
 import { useState, useEffect } from 'react';
 import { Zap, MessagesSquare, Phone, LineChart, BrainCircuit, ScanSearch, CheckCircle2, Megaphone, Users } from 'lucide-react';
 import { Link } from 'react-router-dom';
@@ -14,7 +15,7 @@ export function Dashboard() {
   });
 
   useEffect(() => {
-    fetch('/api/dashboard/metrics')
+    apiFetch('/api/dashboard/metrics')
       .then(res => res.json())
       .then(data => {
         if (data.data) {

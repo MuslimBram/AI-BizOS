@@ -80,11 +80,11 @@ export function Register() {
           createdAt: serverTimestamp()
         });
       } catch (err: any) {
-        console.error("Firestore SetDoc error:", err);
         // We still let them navigate since their Firebase Auth succeeded 
-        if(err.message?.includes('the client is offline')) {
+        if(err.message?.includes('the client is offline') || err.code === 'unavailable') {
            console.warn("Firestore offline - user auth created successfully, basic session will be used");
         } else {
+           console.error("Firestore SetDoc error:", err);
            throw err; // throw higher to the main block
         }
       }

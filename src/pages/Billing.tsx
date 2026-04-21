@@ -1,3 +1,4 @@
+import { apiFetch } from '../lib/api';
 import { useState, useEffect } from 'react';
 import { CreditCard, Zap, CheckCircle2, Download, AlertCircle, TrendingUp, Users, Database, Sparkles } from 'lucide-react';
 import { Button } from '@/components/ui/button';
@@ -10,7 +11,7 @@ export function Billing() {
   const [upgradeDialogOpen, setUpgradeDialogOpen] = useState(false);
 
   useEffect(() => {
-    fetch('/api/billing')
+    apiFetch('/api/billing')
       .then(res => res.json())
       .then(data => {
         setBilling(data.data);
@@ -20,7 +21,7 @@ export function Billing() {
 
   const handlePlanChange = async (newPlan: string) => {
     const isUpgrade = newPlan === 'enterprise_plus';
-    const res = await fetch(`/api/billing/${isUpgrade ? 'upgrade' : 'downgrade'}`, {
+    const res = await apiFetch(`/api/billing/${isUpgrade ? 'upgrade' : 'downgrade'}`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ newPlan })
@@ -72,10 +73,8 @@ export function Billing() {
                 </div>
                 
                 <Dialog open={upgradeDialogOpen} onOpenChange={setUpgradeDialogOpen}>
-                  <DialogTrigger asChild>
-                    <Button size="sm" className="bg-indigo-600 hover:bg-indigo-700 text-white font-bold h-9">
-                      <Zap className="w-3.5 h-3.5 mr-1.5" /> Manage Plan
-                    </Button>
+                  <DialogTrigger className="inline-flex items-center justify-center rounded-lg border border-transparent text-sm transition-all focus-visible:ring-3 disabled:pointer-events-none disabled:opacity-50 group/button shrink-0 bg-indigo-600 hover:bg-indigo-700 text-white font-bold h-9 px-2.5">
+                    <Zap className="w-3.5 h-3.5 mr-1.5" /> Manage Plan
                   </DialogTrigger>
                   <DialogContent className="max-w-3xl">
                     <DialogHeader>

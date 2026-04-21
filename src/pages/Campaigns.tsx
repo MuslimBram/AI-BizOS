@@ -1,3 +1,4 @@
+import { apiFetch } from '../lib/api';
 import { useState, useEffect } from 'react';
 import { Plus, Megaphone, Users, Clock, Loader2, CheckCircle2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
@@ -15,7 +16,7 @@ export function Campaigns() {
   // Fetch campaigns initially and set up basic polling for "sending" status
   useEffect(() => {
     const fetchCampaigns = () => {
-      fetch('/api/campaigns')
+      apiFetch('/api/campaigns')
         .then(res => res.json())
         .then(data => setCampaigns(data.data || []));
     };
@@ -30,7 +31,7 @@ export function Campaigns() {
     setIsSending(true);
     
     try {
-      await fetch('/api/campaigns', {
+      await apiFetch('/api/campaigns', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ name, audience, message })
@@ -55,11 +56,9 @@ export function Campaigns() {
         </div>
         
         <Dialog open={isOpen} onOpenChange={setIsOpen}>
-          <DialogTrigger asChild>
-            <Button className="bg-primary text-primary-foreground">
-              <Plus className="w-4 h-4 mr-2" />
-              New Broadcast
-            </Button>
+          <DialogTrigger className="inline-flex items-center justify-center rounded-[min(var(--radius-md),12px)] border border-transparent text-sm transition-all focus-visible:ring-3 disabled:pointer-events-none disabled:opacity-50 group/button shrink-0 bg-primary text-primary-foreground hover:bg-primary/80 h-9 px-3 font-semibold">
+            <Plus className="w-4 h-4 mr-2" />
+            New Broadcast
           </DialogTrigger>
           <DialogContent className="sm:max-w-md border-border/50 bg-card rounded-xl">
             <DialogHeader>

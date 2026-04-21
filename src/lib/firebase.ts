@@ -23,7 +23,8 @@ if (db) {
       }
     }
   };
-  testConnection();
+  // suppress test errors completely to not bother tests
+  testConnection().catch(() => {});
 }
 
 export { isConfigured };

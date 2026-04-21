@@ -4,8 +4,8 @@ import {
   signOut,
   User as FirebaseUser
 } from 'firebase/auth';
-import { doc, getDoc, setDoc } from 'firebase/firestore';
-import { auth, db } from './firebase';
+import { auth } from './firebase';
+import { apiFetch } from './api';
 
 export interface User {
   id: string;
@@ -46,49 +46,30 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     const unsubscribe = onAuthStateChanged(auth, async (firebaseUser: FirebaseUser | null) => {
       if (firebaseUser) {
         try {
-          if (db) {
-            // Fetch detailed user document from Firestore
-            const userDocRef = doc(db, 'users', firebaseUser.uid);
-            const userDocSnap = await getDoc(userDocRef);
-            
-            if (userDocSnap.exists()) {
-              setUser(userDocSnap.data() as User);
-            } else {
-              // Fallback during registration transition or Google/Apple Login
-              const isOwner = firebaseUser.email?.toLowerCase() === 'muslimani181@gmail.com';
-              const defaultUser: User = {
-                id: firebaseUser.uid,
-                email: firebaseUser.email || '',
-                name: firebaseUser.displayName || firebaseUser.email?.split('@')[0] || 'User',
-                role: isOwner ? 'admin' : 'user', 
-                status: isOwner ? 'active' : 'trial', // Owner gets 'active', normal users get 'trial'
-                avatar: firebaseUser.photoURL || `https://i.pravatar.cc/150?u=${firebaseUser.uid}`,
-                accountType: 'Freelancer', // Best default guess for social logic
-                plan: 'None',
-                duration: 'Trial'
-              };
-              await setDoc(userDocRef, defaultUser);
-              setUser(defaultUser);
-            }
+          // Our backend uses apiFetch which automatically supplies the Firebase ID token.
+          // The backend /api/auth/me endpoint auto-syncs the user to the database if not present.
+          const res = await apiFetch('/api/auth/me');
+          if (res.ok) {
+            const data = await res.json();
+            setUser(data.user);
+          } else {
+            throw new Error("Unable to sync identity with backend");
           }
         } catch (error: any) {
-          console.error("Error fetching user data from Firestore", error);
-          
-          if (error.message?.includes("client is offline") || error.code === 'unavailable') {
-            const isOwner = firebaseUser.email?.toLowerCase() === 'muslimani181@gmail.com';
-            // Set temporary session if Firestore fails
-            setUser({
-              id: firebaseUser.uid,
-              email: firebaseUser.email || '',
-              name: firebaseUser.displayName || firebaseUser.email?.split('@')[0] || 'User',
-              role: isOwner ? 'admin' : 'user', 
-              status: isOwner ? 'active' : 'trial',
-              avatar: firebaseUser.photoURL || `https://i.pravatar.cc/150?u=${firebaseUser.uid}`,
-              accountType: 'Freelancer',
-              plan: 'None',
-              duration: 'Trial'
-            });
-          }
+          console.warn("Backend Sync Failed - using fallback user session", error);
+          const isOwner = firebaseUser.email?.toLowerCase() === 'muslimani181@gmail.com';
+          const fallbackUser: User = {
+            id: firebaseUser.uid,
+            email: firebaseUser.email || '',
+            name: firebaseUser.displayName || firebaseUser.email?.split('@')[0] || 'User',
+            role: isOwner ? 'owner' : 'user', 
+            status: 'active',
+            avatar: firebaseUser.photoURL || `https://i.pravatar.cc/150?u=${firebaseUser.uid}`,
+            accountType: 'Freelancer',
+            plan: 'None',
+            duration: 'Trial'
+          };
+          setUser(fallbackUser);
         }
       } else {
         setUser(null);
