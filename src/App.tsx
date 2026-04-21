@@ -113,9 +113,12 @@ const ProtectedRoute = ({ children }: { children: React.ReactNode }) => {
     }
   }
 
-  // If the frontend user object doesn't have a workspace, they should create one.
-  // Note: the backend Auth sync must return workspace_id going forward. (We'll update that if not already passed)
-  if (!(user as any).workspace_id && localStorage.getItem('active_workspace_id') == null) {
+  // Determine if onboarding is required
+  const effectiveWsId = (user as any).workspace_id;
+  const isDefaultWs = !effectiveWsId || effectiveWsId === 'ws-bizos-001';
+  
+  // They must onboard if they only have the default workspace and haven't explicitly set an active one
+  if (isDefaultWs && localStorage.getItem('active_workspace_id') == null) {
     return <Navigate to="/onboarding" replace />;
   }
   

@@ -67,8 +67,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
             avatar: firebaseUser.photoURL || `https://i.pravatar.cc/150?u=${firebaseUser.uid}`,
             accountType: 'Freelancer',
             plan: 'None',
-            duration: 'Trial'
-          };
+            duration: 'Trial',
+            workspace_id: localStorage.getItem('active_workspace_id') || 'ws-bizos-001'
+          } as any;
           setUser(fallbackUser);
         }
       } else {
@@ -88,6 +89,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       setUser(null);
       setIs2FAVerified(false);
       sessionStorage.removeItem('is2FAVerified');
+      localStorage.removeItem('active_workspace_id');
     }
   };
 
