@@ -23,6 +23,25 @@ db.pragma('journal_mode = WAL');
 
 // Initialize schema
 db.exec(`
+  
+  
+  CREATE TABLE IF NOT EXISTS kb_documents (
+    workspace_id TEXT NOT NULL,
+    id TEXT PRIMARY KEY,
+    title TEXT NOT NULL,
+    content TEXT NOT NULL,
+    embedding TEXT, -- JSON array of numbers
+    created_at TEXT NOT NULL
+  );
+
+  CREATE TABLE IF NOT EXISTS workspaces (
+    id TEXT PRIMARY KEY,
+    name TEXT NOT NULL,
+    slug TEXT NOT NULL,
+    industry TEXT,
+    created_hook TEXT
+  );
+
   CREATE TABLE IF NOT EXISTS users (
     workspace_id TEXT NOT NULL,
     id TEXT PRIMARY KEY,
@@ -84,6 +103,28 @@ db.exec(`
     content TEXT NOT NULL,
     created_at TEXT NOT NULL
   );
+
+  CREATE TABLE IF NOT EXISTS jobs (
+    workspace_id TEXT NOT NULL,
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    type TEXT NOT NULL,
+    payload TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'pending',
+    error TEXT,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+  );
+
+  CREATE TABLE IF NOT EXISTS files (
+    workspace_id TEXT NOT NULL,
+    id TEXT PRIMARY KEY,
+    original_name TEXT NOT NULL,
+    file_path TEXT NOT NULL,
+    mime_type TEXT NOT NULL,
+    size INTEGER NOT NULL,
+    uploaded_at TEXT NOT NULL
+  );
+
 
   CREATE TABLE IF NOT EXISTS tickets (
     workspace_id TEXT NOT NULL,
@@ -215,7 +256,18 @@ export const Queries = {
 
   getUsers: () => db.prepare('SELECT * FROM users WHERE workspace_id = ?').all(getWs()),
   getUserByEmail: (email: string) => db.prepare('SELECT * FROM users WHERE workspace_id = ? AND LOWER(email) = LOWER(?)').get(getWs(), email),
-  getUserById: (id: string) => db.prepare('SELECT * FROM users WHERE workspace_id = ? AND id = ?').get(getWs(), id),
+  getUserById: (id: string) => db.prepare('SELECT * FROM users WHERE id = ?').get(id),
+
+  createWorkspace: (wsId: string, name: string, industry: string) => {
+    db.prepare('INSERT INTO workspaces (id, name, slug, industry, created_hook) VALUES (?, ?, ?, ?, ?)').run(wsId, name, name.toLowerCase().replace(/[^a-z0-9]+/g, '-'), industry, new Date().toISOString());
+  },
+  getWorkspace: (wsId: string) => {
+    return db.prepare('SELECT * FROM workspaces WHERE id = ?').get(wsId);
+  },
+  updateUserWorkspace: (userId: string, newWsId: string) => {
+    db.prepare('UPDATE users SET workspace_id = ? WHERE id = ?').run(newWsId, userId);
+  },
+
   createUser: (u: any) => {
     db.prepare('INSERT INTO users (workspace_id, id, email, role, name, status, avatar) VALUES (@workspace_id, @id, @email, @role, @name, @status, @avatar)').run({ workspace_id: getWs(), ...u, avatar: u.avatar || null });
   },
@@ -246,5 +298,48 @@ export const Queries = {
   createAutomation: (a: any) => {
     db.prepare('INSERT INTO automations (workspace_id, name, trigger, action, status) VALUES (@workspace_id, @name, @trigger, @action, @status)').run({ workspace_id: getWs(), ...a });
   },
-  getAutomationById: (id: number) => db.prepare('SELECT * FROM automations WHERE workspace_id = ? AND id = ?').get(getWs(), id)
+
+  getAutomationById: (id: number) => db.prepare('SELECT * FROM automations WHERE workspace_id = ? AND id = ?').get(getWs(), id),
+
+  // --- Jobs ---
+  enqueueJob: (type: string, payload: any) => {
+    const wsId = getWs();
+    const stmt = db.prepare('INSERT INTO jobs (workspace_id, type, payload, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)');
+    const now = new Date().toISOString();
+    return stmt.run(wsId, type, JSON.stringify(payload), 'pending', now, now);
+  },
+  getPendingJobs: () => {
+    return db.prepare("SELECT * FROM jobs WHERE status = 'pending' ORDER BY created_at ASC LIMIT 10").all();
+  },
+  updateJobStatus: (jobId: number, status: string, error: string | null = null) => {
+    const stmt = db.prepare("UPDATE jobs SET status = ?, error = ?, updated_at = ? WHERE id = ?");
+    stmt.run(status, error, new Date().toISOString(), jobId);
+  },
+
+  // --- Files ---
+  saveFileRecord: (id: string, originalName: string, filePath: string, mimeType: string, size: number) => {
+    const wsId = getWs();
+    const stmt = db.prepare('INSERT INTO files (workspace_id, id, original_name, file_path, mime_type, size, uploaded_at) VALUES (?, ?, ?, ?, ?, ?, ?)');
+    stmt.run(wsId, id, originalName, filePath, mimeType, size, new Date().toISOString());
+    return { id, original_name: originalName, file_path: filePath, mime_type: mimeType, size };
+  },
+
+  // --- Knowledge Base ---
+  addKbDocument: (id: string, title: string, content: string, embedding: number[]) => {
+    const wsId = getWs();
+    db.prepare('INSERT INTO kb_documents (workspace_id, id, title, content, embedding, created_at) VALUES (?, ?, ?, ?, ?, ?)').run(
+      wsId, id, title, content, JSON.stringify(embedding), new Date().toISOString()
+    );
+  },
+  getKbDocuments: () => {
+    return db.prepare('SELECT id, title, content, created_at FROM kb_documents WHERE workspace_id = ? ORDER BY created_at DESC').all(getWs());
+  },
+  getKbEmbeddings: () => {
+    return db.prepare('SELECT id, content, embedding FROM kb_documents WHERE workspace_id = ?').all(getWs());
+  },
+
+  getFiles: () => {
+    const wsId = getWs();
+    return db.prepare('SELECT * FROM files WHERE workspace_id = ? ORDER BY uploaded_at DESC').all(wsId);
+  }
 };

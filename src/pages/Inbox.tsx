@@ -11,6 +11,46 @@ export function Inbox() {
   const [messages, setMessages] = useState<any[]>([]);
   const [input, setInput] = useState('');
   const [isSending, setIsSending] = useState(false);
+  const [isUploading, setIsUploading] = useState(false);
+
+  const handleFileUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file || !activeThread) return;
+    
+    setIsUploading(true);
+    const formData = new FormData();
+    formData.append('file', file);
+    
+    try {
+      const uploadRes = await apiFetch('/api/upload', {
+        method: 'POST',
+        headers: {
+          // Do NOT set Content-Type here; browser sets it with appropriate boundary for FormData
+        },
+        body: formData
+      });
+      const uploadData = await uploadRes.json();
+      
+      if (uploadData.success && uploadData.file) {
+        // Now send a message with the attachment link
+        const fileUrl = uploadData.file.file_path;
+        await apiFetch('/api/messages', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              conversation_id: activeThread.id,
+              content: `Attached File: ${uploadData.file.original_name}\n${window.location.origin}${fileUrl}`,
+              sender_type: 'contact'
+            })
+        });
+      }
+    } catch (e) {
+      console.error("Upload failed", e);
+    } finally {
+      setIsUploading(false);
+      event.target.value = ''; // Reset input
+    }
+  };
 
   useEffect(() => {
     // 1. WebSocket Setup
@@ -217,12 +257,21 @@ export function Inbox() {
                   className="w-full bg-transparent resize-none outline-none text-sm p-2 text-foreground placeholder:text-muted-foreground min-h-[40px] max-h-[120px]"
                 />
                 <div className="flex justify-between items-center px-2 mt-2">
-                  <div className="flex gap-3 text-muted-foreground">
-                    <button className="hover:text-foreground transition-colors"><Paperclip className="w-4 h-4" /></button>
+                  <div className="flex gap-3 text-muted-foreground relative">
+                    <label className="hover:text-foreground transition-colors cursor-pointer">
+                      <Paperclip className="w-4 h-4" />
+                      <input 
+                        type="file" 
+                        className="hidden" 
+                        onChange={handleFileUpload}
+                        disabled={isUploading || isSending}
+                      />
+                    </label>
                     <button className="hover:text-foreground transition-colors"><Smile className="w-4 h-4" /></button>
                     <button className="flex items-center gap-1 text-[11px] font-medium bg-primary/10 text-primary px-2 py-1 rounded hover:bg-primary/20 transition-colors">
                       <Bot className="w-3 h-3" /> AI Suggest
                     </button>
+                    {isUploading && <span className="text-[10px] absolute -top-5 left-0 text-success">Uploading...</span>}
                   </div>
                   <button 
                     onClick={handleSend}

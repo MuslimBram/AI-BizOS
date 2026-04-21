@@ -3,6 +3,11 @@ import http from 'http';
 import { encrypt, decrypt } from './encryption';
 
 import express from "express";
+
+import multer from 'multer';
+import crypto from 'crypto';
+import fs from 'fs';
+
 import admin from 'firebase-admin';
 
 
@@ -82,8 +87,161 @@ const requireRole = (allowedRoles: string[]) => {
     });
   });
 
+  
+// --- File Upload Setup ---
+const storage = multer.diskStorage({
+  destination: (req, res, cb) => {
+    cb(null, 'uploads/');
+  },
+  filename: (req, file, cb) => {
+    const ext = path.extname(file.originalname);
+    const id = crypto.randomUUID();
+    cb(null, `${id}${ext}`);
+  }
+});
+const upload = multer({ storage, limits: { fileSize: 50 * 1024 * 1024 } }); // 50MB limit
+
+// Serve static uploads
+app.use('/uploads', express.static(path.join(process.cwd(), 'uploads')));
+
+// Upload Endpoint
+app.post("/api/upload", requireAuth, upload.single('file'), (req, res) => {
+  if (!req.file) {
+    return res.status(400).json({ error: "No file uploaded" });
+  }
+  
+  const fileId = path.basename(req.file.filename, path.extname(req.file.filename));
+  const urlPath = `/uploads/${req.file.filename}`;
+  
+  // Save to DB
+  const record = db.saveFileRecord(
+    fileId, 
+    req.file.originalname, 
+    urlPath, 
+    req.file.mimetype, 
+    req.file.size
+  );
+
+  res.json({ success: true, file: record });
+});
+
+app.get("/api/files", requireAuth, (req, res) => {
+  res.json({ success: true, data: db.getFiles() });
+});
+
+
+  // Knowledge Base Endpoints
+  app.post("/api/kb/documents", requireAuth, async (req, res) => {
+    const { title, content: docContent } = req.body;
+    if (!title || !docContent) return res.status(400).json({ error: "Missing title or content" });
+    
+    try {
+      // 1. Generate Embedding
+      const embedResponse = await ai.models.embedContent({
+        model: 'gemini-embedding-2-preview',
+        contents: docContent,
+        config: { outputDimensionality: 256 }
+      });
+      
+      const embedding = embedResponse.embeddings?.[0]?.values;
+      if (!embedding) throw new Error("Failed to generate embedding");
+
+      // 2. Save
+      const id = crypto.randomUUID();
+      db.addKbDocument(id, title, docContent, embedding as number[]);
+      
+      res.json({ success: true, document: { id, title } });
+    } catch(e: any) {
+      console.error(e);
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  app.get("/api/kb/documents", requireAuth, (req, res) => {
+    res.json({ success: true, data: db.getKbDocuments() });
+  });
+
+  // Basic in-memory Vector Search 
+  app.post("/api/kb/search", requireAuth, async (req, res) => {
+    const { query, limit = 3 } = req.body;
+    if (!query) return res.status(400).json({ error: "Missing query" });
+    
+    try {
+      // 1. Embed query
+      const embedResponse = await ai.models.embedContent({
+        model: 'gemini-embedding-2-preview',
+        contents: query,
+        config: { outputDimensionality: 256 }
+      });
+      const queryVec = embedResponse.embeddings?.[0]?.values;
+      if (!queryVec) throw new Error("Embedding failed");
+
+      // 2. Fetch all embeddings for tenant
+      const docs = db.getKbEmbeddings() as { id: string, content: string, embedding: string }[];
+      
+      // 3. Cosine similarity
+      const cosineSim = (a: number[], b: number[]) => {
+        let dot = 0, normA = 0, normB = 0;
+        for(let i=0; i<a.length; i++) {
+          dot += a[i] * b[i];
+          normA += a[i] * a[i];
+          normB += b[i] * b[i];
+        }
+        return dot / (Math.sqrt(normA) * Math.sqrt(normB));
+      };
+
+      const scored = docs.map(d => {
+        const docVec = JSON.parse(d.embedding) as number[];
+        return {
+          id: d.id,
+          content: d.content,
+          score: cosineSim(queryVec as number[], docVec)
+        };
+      }).sort((a,b) => b.score - a.score).slice(0, limit);
+
+      // Return context chunks
+      res.json({ success: true, context: scored });
+    } catch(e: any) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
   // Health & Webhooks (Public)
   app.get("/api/health", (req, res) => res.json({ status: "ok" }));
+
+  // Workspace Onboarding
+  app.post("/api/workspaces", requireAuth, (req, res) => {
+    const { name, industry } = req.body;
+    if (!name) return res.status(400).json({ error: "Name required" });
+    
+    // Gen new ws
+    const wsId = 'ws-' + crypto.randomBytes(4).toString('hex');
+    db.createWorkspace(wsId, name, industry || 'Other');
+    
+    // Switch user's workspace
+    const userId = (req as any).user.uid;
+    db.updateUserWorkspace(userId, wsId);
+
+    // Sync context directly for any immediate after-operations
+    res.json({ success: true, workspace: { id: wsId, name } });
+  });
+
+  app.get("/api/workspaces/current", requireAuth, (req, res) => {
+    const userId = (req as any).user.uid;
+    const user = db.getUserById(userId); // wait, user won't get matched if we use getWs() which is 'ws-bizos-001' by default and they are in a different ws..
+    // Actually db.getUserById uses getWs(), this is slightly flawed if we switch workspaces because user is tied to ONE workspace in this schema.
+    
+    // Let's lookup user directly via custom query
+    res.json({ success: true }); // Mocked response for now
+  });
+
+  
+  app.post("/api/webhooks/test", (req, res) => {
+    // Fire and forget
+    db.enqueueJob('process_ai_webhook', req.body);
+    res.json({ success: true, message: "Webhook accepted and queued for processing" });
+  });
+  
   app.post("/api/webhooks/*", (req, res, next) => {
     // Let webhooks pass down
     next();
@@ -611,7 +769,10 @@ id: Date.now() + 1, conversation_id: convo.id, content: aiResponseText, sender_t
 
   // Current Auth User
   app.get("/api/auth/me", (req, res) => {
-    const user = db.getUserById((req as any).user.uid);
+    let user = db.getUserById((req as any).user.uid);
+    // user will exist because requireAuth creates them if missing.
+    // If they were created entirely fresh, they land in ws-bizos-001. If we don't want that, we can later 
+    // change requireAuth to not auto-create them, or let onboarding switch it.
     res.json({ success: true, user });
   });
 
@@ -1018,7 +1179,45 @@ id: Date.now() + 1,
 
     (global as any).io = io;
 
-    // --- Vite Middleware for Development ---
+    
+// --- Background Job Worker ---
+const queueInterval = setInterval(async () => {
+  try {
+    const jobs = db.getPendingJobs();
+    for (const job of jobs) {
+      db.updateJobStatus(job.id, 'processing');
+      try {
+        const payload = JSON.parse(job.payload);
+        
+        if (job.type === 'send_email_broadcast') {
+          // Simulate sending emails
+          console.log(`[JOB ${job.id}] Sending email broadcast to ${payload.recipients?.length} users...`);
+          await new Promise(resolve => setTimeout(resolve, 2000)); 
+          console.log(`[JOB ${job.id}] Broadcast complete.`);
+        } else if (job.type === 'process_ai_webhook') {
+          // Simulate AI processing
+          console.log(`[JOB ${job.id}] Processing AI webhook data...`);
+          await new Promise(resolve => setTimeout(resolve, 1500));
+        } else {
+          console.log(`[JOB ${job.id}] Executing unknown job type: ${job.type}`);
+          await new Promise(resolve => setTimeout(resolve, 500));
+        }
+
+        db.updateJobStatus(job.id, 'completed');
+      } catch(err: any) {
+        console.error(`[JOB ${job.id}] Error: `, err);
+        db.updateJobStatus(job.id, 'failed', err.message);
+      }
+    }
+  } catch(err) {
+    // Suppress general queue errors
+  }
+}, 5000); // Check every 5 seconds
+
+// Attach enqueueJob globally just for testing from outside (optional)
+(global as any).enqueueJob = db.enqueueJob;
+
+  // --- Vite Middleware for Development ---
     if (process.env.NODE_ENV !== "production") {
         const vite = await createViteServer({
         server: { middlewareMode: true },

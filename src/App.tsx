@@ -19,6 +19,7 @@ import { Login } from './pages/Login';
 import { Register } from './pages/Register';
 import { Auth2FA } from './pages/Auth2FA';
 import { PendingApproval } from './pages/PendingApproval';
+import { Onboarding } from './pages/Onboarding';
 import { WorkspaceSettings } from './pages/WorkspaceSettings';
 import { AutonomousOS } from './pages/AutonomousOS';
 import { IntegrationHub } from './pages/IntegrationHub';
@@ -111,6 +112,12 @@ const ProtectedRoute = ({ children }: { children: React.ReactNode }) => {
       return <Navigate to="/pending-approval" replace />;
     }
   }
+
+  // If the frontend user object doesn't have a workspace, they should create one.
+  // Note: the backend Auth sync must return workspace_id going forward. (We'll update that if not already passed)
+  if (!(user as any).workspace_id && localStorage.getItem('active_workspace_id') == null) {
+    return <Navigate to="/onboarding" replace />;
+  }
   
   return <>{children}</>;
 };
@@ -148,6 +155,7 @@ export default function App() {
             <Route path="/register" element={<Register />} />
             <Route path="/2fa" element={<Auth2FA />} />
             <Route path="/pending-approval" element={<PendingApproval />} />
+            <Route path="/onboarding" element={<Onboarding />} />
             
             <Route path="/" element={<ProtectedRoute><DashboardLayout /></ProtectedRoute>}>
             <Route index element={<Navigate to="/dashboard" replace />} />
